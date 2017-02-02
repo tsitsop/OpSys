@@ -39,6 +39,7 @@ int main(int argc, char* argv[]) {
 	int uniqueCount, totalCount = 0;
 
 	printf("Allocated initial parallel arrays of size 8.\n");
+	fflush(stdout);
 
 	while (1) { 
 		/* Read in non-alphanumeric characters */
@@ -91,7 +92,8 @@ int main(int argc, char* argv[]) {
 				}
 				wordCount = newWordCount;
 
-				printf("Re-allocated parallel arrays to be size %d\n", maxSize);
+				printf("Re-allocated parallel arrays to be size %d.\n", maxSize);
+				fflush(stdout);
 			}
 
 			words[i] = malloc(sizeof(word));
@@ -105,11 +107,14 @@ int main(int argc, char* argv[]) {
 	}
 
 	printf("All done (successfully read %d words; %d unique words).\n", totalCount, uniqueCount);
-	printf("All words (and corresponding counts) are:\n");
-
-	/* If no outputLength was specified, must print all words. */
+	fflush(stdout);
 	if (outputLength == 0) {
+		printf("All words (and corresponding counts) are:\n");
+		fflush(stdout);
+
 		outputLength = uniqueCount;
+	} else {
+		printf("First %d words (and corresponding counts) are:\n", outputLength);
 	}
 
 	int j;
@@ -120,6 +125,7 @@ int main(int argc, char* argv[]) {
 	/* Close file */
 	if (fclose(fp) != 0) {
 		fprintf(stderr, "ERROR: Could not close %s\n", argv[1]);
+		fflush(stdout);
 	}
 
 	/* Free allocated memory */
