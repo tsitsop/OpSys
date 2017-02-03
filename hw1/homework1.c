@@ -29,11 +29,15 @@ int main(int argc, char* argv[]) {
 	char word[80];
 	char** words = calloc(8, sizeof(char*));
 	if (words == NULL) {
+		fprintf(stderr, "ERROR: Error allocating memory.\n");
 
+		return EXIT_FAILURE;
 	}
 	int* wordCount = calloc(8, sizeof(int));
 	if (wordCount == NULL) {
+		fprintf(stderr, "ERROR: Error allocating memory.\n");
 
+		return EXIT_FAILURE;
 	}
 	int maxSize = 8;
 	int uniqueCount, totalCount = 0;
@@ -134,6 +138,8 @@ int main(int argc, char* argv[]) {
 	}
 	free(words);
 	free(wordCount);
+	words = NULL;
+	wordCount = NULL;
 
 	return EXIT_SUCCESS;
 }
