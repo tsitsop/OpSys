@@ -37,7 +37,7 @@ int main(int argc, char* argv[]) {
 		/* Create pipe between parent and child */
 		rc = pipe(pcp[i]);
     	if ( rc == -1 ) {
-			perror("ERROR: pipe() failed");
+			perror( "pipe() failed" );
 			exit(EXIT_FAILURE);
 		}
 
@@ -52,7 +52,7 @@ int main(int argc, char* argv[]) {
 			for (z = 0; z < 3; z++) {
 				rc = pipe(cgp[i][z]);
 		    	if ( rc == -1 ) {
-					perror("ERROR: pipe() failed");
+					perror( "pipe() failed" );
 					exit(EXIT_FAILURE);
 				}
 			}
@@ -78,7 +78,6 @@ int main(int argc, char* argv[]) {
 				}
 			}
 
-
 			printf("PID %d: Processing %s (created three child processes)\n", getpid(), argv[i+1]);
 			fflush(stdout);
 
@@ -100,7 +99,7 @@ int main(int argc, char* argv[]) {
 				exit(EXIT_FAILURE);
 			}
 
-			printf("PID %d: Sent %s counts to parent (then exiting)\n", getpid(), argv[i+1]);
+			printf("PID %d: Sent %s counts to parent\n", getpid(), argv[i+1]);
 			fflush(stdout);
 
 			exit(EXIT_SUCCESS);
@@ -136,10 +135,8 @@ int main(int argc, char* argv[]) {
 	printf("PID %d: All files contain %d alnum, %d space, and %d other characters\n", getpid(), 
 				totalCounts[0], totalCounts[1], totalCounts[2]);
 	fflush(stdout);
-	printf("PID %d: Program ended (top-level process)", getpid());
+	printf("PID %d: Program ended (top-level process)\n", getpid());
 	fflush(stdout);
-
-	free(totalCounts);
 
 	return EXIT_SUCCESS;
 }
