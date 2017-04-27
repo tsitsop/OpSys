@@ -26,7 +26,7 @@ pthread_mutex_t m;
 /* function headers */
 void* tcp_thread(void*);
 void getList(char*, int*, char**);
-int saveFile(tcpInfo*, char*, int);
+int saveFile(tcpInfo*, char*);
 int readFile(tcpInfo*, char*);
 
 
@@ -209,7 +209,7 @@ void* tcp_thread(void* connectionInfo) {
 
 	int n;
 	char command[5];
-	char buffer[1025];
+	char buffer[1024];
 	char* returnStr;
 
 
@@ -230,8 +230,6 @@ void* tcp_thread(void* connectionInfo) {
 	    	printf("[child %u] Client disconnected\n", (unsigned int)pthread_self());
 	    	break;
 	    }
-	    // printf("got %s\n", buffer);
-	    // printf("^-- this was %d bytes\n", n);
 
 	    //printf("[child %u] Received %s", (unsigned int)pthread_self(), buffer);
 		//fflush(stdout);
@@ -248,7 +246,7 @@ void* tcp_thread(void* connectionInfo) {
 	
 			free(returnStr);
 		} else if (!strncmp(command, "SAVE", 5)) { /* save file */
-			if (saveFile(info, buffer, n) == 1) {
+			if (saveFile(info, buffer) == 1) {
 				n = send( info->tcpsd, "ACK\n", 4, 0 );
 				printf("[child %u] Sent ACK\n", (unsigned int)pthread_self());
 				fflush(stdout);
@@ -273,7 +271,7 @@ void* tcp_thread(void* connectionInfo) {
 }
 
 
-int saveFile(tcpInfo* info, char* buffer, int messageSize) {
+int saveFile(tcpInfo* info, char* buffer) {
 	int i = 0;
 	int n;
 	char* fileName;
@@ -286,8 +284,7 @@ int saveFile(tcpInfo* info, char* buffer, int messageSize) {
 
 	              /* SAVE fname bytes\nmessage */
 	if (sscanf(buffer, "%*s %ms %d\n%*s", &fileName, &bytes) != 2) {
-		printf("%s\n", buffer );
-		fprintf(stderr, "ERROR INVALID REQUEST p\n");
+		fprintf(stderr, "ERROR INVALID REQUEST\n");
 		n = send(info->tcpsd, "ERROR INVALID REQUEST\n", 22, 0);
 		return 0;
 	}
@@ -295,10 +292,6 @@ int saveFile(tcpInfo* info, char* buffer, int messageSize) {
 
 
 	n = sprintf(msg, "SAVE %s %d\n", fileName, bytes);
-
-	int sizecommand = n;
-
-
 	printf("[child %u] Received %s", (unsigned int)pthread_self(), msg );
 	fflush(stdout);
 
@@ -361,25 +354,17 @@ int saveFile(tcpInfo* info, char* buffer, int messageSize) {
 	pthread_mutex_lock(&m);
 	fp = fopen(fileName, "wb+");
 
-	// printf("about to write\n");
-	n = fwrite(extra, 1, messageSize - sizecommand, fp);
-	// printf("wrote\n");
-	// fputs(extra, fp);
-	totBytes += n;
+	fputs(extra, fp);
+	totBytes += strlen(extra);
 
-	// printf("totBytes = %d\n", totBytes);
-	// printf("bytes = %d\n", bytes);
-	int written = 0;
 
 	while (totBytes < bytes) {
-		// printf("reading more!!!!!!!\n");
 		/* read the command */
 		n = recv(info->tcpsd, buffer, 1024, 0 );
-		// printf("got another %d\n", n );
 		totBytes += n;
+		// buffer[n] = '\0';
 
-		written = fwrite(buffer, 1, n, fp);
-		if (written != n) {
+		if (fputs(buffer, fp) == '\0') {
 			if (chdir("..") == -1) {
 				perror("ERROR chdir() failed\n");
 			}
@@ -392,9 +377,6 @@ int saveFile(tcpInfo* info, char* buffer, int messageSize) {
 			return 0;
 		}
 	}
-
-	// printf("totBytes = %d\n", totBytes);
-	// printf("bytes = %d\n", bytes);
 
 	if (fclose(fp) != 0) {
 		perror("ERROR CLOSING FILE");
@@ -465,12 +447,8 @@ int readFile(tcpInfo* info, char* buffer) {
 
 	/* change to storage directory */
 	struct stat statbuffer;
-	char filepath[40];
-	sprintf(filepath, "storage/%s", fileName);
-	printf("STORAGEEEEEEEEEEEEEEEEEEEE = %s\n", filepath);
 
 	if (chdir("storage") == -1) {
-		printf("cant open storage...\n");
 		perror("ERROR chdir() failed");
 		return 0;
 	}
@@ -488,9 +466,9 @@ int readFile(tcpInfo* info, char* buffer) {
 	}
 
 	if (statbuffer.st_size < offset + length) {
-		// printf("statsize: %d\n", (int)statbuffer.st_size);
-		// printf("offset: %d\n", offset );
-		// printf("length: %d\n", length );
+		printf("statsize: %d\n", (int)statbuffer.st_size);
+		printf("offset: %d\n", offset );
+		printf("length: %d\n", length );
 		printf("[child %u] Sent ERROR INVALID BYTE RANGE\n", (unsigned int)pthread_self());
 		n = send(info->tcpsd, "ERROR INVALID BYTE RANGE\n", 26, 0);
 
@@ -505,72 +483,49 @@ int readFile(tcpInfo* info, char* buffer) {
 	/* READ FILE */
 	FILE* fp;
 	char bytes[length+1];
-	char trash[1024];
-	// int o = offset;
+	int o = offset;
 	pthread_mutex_lock(&m);
 	fp = fopen(fileName, "rb");
 
-	// printf("need to skip over first %d bytes\n", offset );
+
+	printf("o: %d\n", o);
+
 	/* skip over offset... */
-	n = fread(trash, 1, offset, fp);
-	if ( n != offset) {
-		// printf("offset = %d\n", offset);
-		// printf("n = %d\n", n);
-		perror("ERROR READING OFFSET");
-		if (chdir("..") == -1) {
-			perror("ERROR chdir() failed");
-			return 0;
-		}
-		return 0;
+	while (o > 0) {
+		fgetc(fp);
+		o--;
 	}
-	// printf("skipped over %d\n", n);
 
-
-	// while (o > 0) {
-	// 	fgetc(fp);
-	// 	o--;
-	// }
-
+	printf("length: %d\n", length);
+	i = 0;
 	/* save relevant bytes */
-	n = fread(bytes, 1, length, fp);
-	if ( n != length) {
-		perror("ERROR READING RELEVANT");
-		if (chdir("..") == -1) {
-			perror("ERROR chdir() failed");
-			return 0;
-		}
-		return 0;
+	while (length > 0) {
+		bytes[i] = fgetc(fp);
+		i++;
+		length--;
+		printf("bytes[i]: %c\n", bytes[i]);
 	}
-	// while (length > 0) {
-	// 	bytes[i] = fgetc(fp);
-	// 	i++;
-	// 	length--;
-	// }
+	printf("i: %d\n", i);
 
 	/* close file */
 	if (fclose(fp) != 0) {
 		perror("ERROR CLOSING FILE");
 		n = send(info->tcpsd, "ERROR CLOSING FILE\n", 19, 0);
-
-		if (chdir("..") == -1) {
-			perror("ERROR chdir() failed");
-			return 0;
-		}
-
 		return 0;
 	}
 	pthread_mutex_unlock(&m);
 
+	// bytes[i] = '\0';
+
 	char msg[1024];
-	int num = n;
 
-	sprintf(msg, "ACK %d\n", n);
+	sprintf(msg, "ACK %d\n", i);
 	n = send(info->tcpsd, msg, strlen(msg)+1, 0);
-	n = send(info->tcpsd, bytes, num, 0);
+	n = send(info->tcpsd, bytes, i+1, 0);
 	printf("[child %u] Sent %s",  (unsigned int)pthread_self(), msg);
-
-	sprintf(msg, "[child %u] Sent %d bytes of \"%s\" from offset %d", (unsigned int)pthread_self(), num, fileName, offset);
+	sprintf(msg, "[child %u] Sent %d bytes of \"%s\" from offset %d", (unsigned int)pthread_self(), i, fileName, offset);
 	printf("%s\n", msg);
+	printf("%sppp\n", bytes);
 
 
 	if (chdir("..") == -1) {
@@ -578,6 +533,8 @@ int readFile(tcpInfo* info, char* buffer) {
 		return 0;
 	}
 
+
+	n--;
 
 	return 1;
 

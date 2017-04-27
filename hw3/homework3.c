@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include <string.h>
 #include <pthread.h>
+#include <stdbool.h>
 
 /* define global variables */
 unsigned int counts[3] = {0,0,0};
@@ -23,6 +24,7 @@ typedef struct {
 /* function headers */
 void* child_thread_function(void*);
 void* grandchild_thread_function(void*);
+bool existsFile(char*);
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
@@ -31,18 +33,20 @@ int main(int argc, char* argv[]) {
 	}
 
     int i = 0;
-
-    FILE * file;
+    /* check to see if there is at least one valid file */
+    bool noFiles = true;
     for (i = 0; i < argc-1; i++) {
-        file = fopen(argv[i+1], "r");
-        if (file != NULL) {
-            fclose(file);
-            free(file);
-        } else {
-            fprintf(stderr, "ERROR: %s not found.\n", argv[i+1]);
-            free(file);
-            return EXIT_FAILURE;
-        }
+    	if (existsFile(argv[i+1])) {
+    		noFiles = false;
+    		break;
+    	} else {
+    		fprintf(stderr, "ERROR: %s does not exist\n", argv[i+1]);
+    	}
+    }
+
+    /* if there are no valid files, return */
+    if (noFiles == true) {
+    	return EXIT_FAILURE;
     }
     
     printf("THREAD %u: Program started (top-level thread)\n", (unsigned int)pthread_self());
@@ -52,6 +56,12 @@ int main(int argc, char* argv[]) {
 
     /* create all children */
     for (i = 0; i < argc-1; i+=1) {
+    	/* if the current file doesn't exist, continue loop */
+    	if (!existsFile(argv[i+1])) {
+    		fprintf(stderr, "ERROR: %s does not exist\n", argv[i+1]);
+    		continue;
+    	}
+
         /* dynamically allocate memory for the next thread */
         child_t* child = malloc(sizeof(child_t));
         child->fileName = argv[i+1];
@@ -68,15 +78,15 @@ int main(int argc, char* argv[]) {
     }
 
     /* wait for child threads to return */
-    for (i = 0; i < argc-1; i++) {
-        unsigned int ** x = malloc (3*sizeof(int*));
+    unsigned int ** x = malloc (3*sizeof(int*));
+    for (i = 0; i < argc-1; i++) {     
         pthread_join( tid[i], (void **)&x );    /* BLOCKING CALL */
 
         counts[0] += *x[0];
         counts[1] += *x[1];
         counts[2] += *x[2];
-        free( x );
     }
+    free(x);
 
     printf("THREAD %u: All files contain %d alnum, %d space, and %d other characters\n", 
         (unsigned int)pthread_self(), counts[0], counts[1], counts[2]);
@@ -117,12 +127,12 @@ void* child_thread_function(void* arg) {
     }
     
     /* wait for grandchildren to complete */
+    int** x = malloc(sizeof(int*));
     for (j = 0; j < 3; j++) {
-        int** x = malloc(sizeof(int*));
         pthread_join( gtid[j], (void**)x );    /* BLOCKING CALL */
         c[j] = *x;
-        free(x);
     }
+    free(x);
 
     printf("THREAD %u: File %s contains %d alnum, %d space, and %d other characters\n", (unsigned int)pthread_self(), 
 				child->fileName, *c[0], *c[1], *c[2]);
@@ -175,4 +185,14 @@ void* grandchild_thread_function(void* arg) {
 
     pthread_mutex_unlock(&m);
     pthread_exit(count);
+}
+
+bool existsFile(char* fileName) {
+	FILE * file = fopen(fileName, "r");
+	if (file == NULL) {
+		return false;
+	} else {
+		fclose(file);
+		return true;
+	}
 }

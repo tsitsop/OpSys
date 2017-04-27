@@ -166,7 +166,6 @@ int main(int argc, char* argv[]) {
 	    /* if udp datagram */
 	    if (FD_ISSET(udpsd, &readfds)) {
 	    	char command[6];
-	    	while(1) {
 	    		/* read a datagram from the remote client side (BLOCKING) */
     			n = recvfrom(udpsd, command, 5, 0, (struct sockaddr *) &client, (socklen_t *) &fromlen);
 
@@ -186,15 +185,17 @@ int main(int argc, char* argv[]) {
     				continue;
     			}
 
+				printf("Received LIST\n");
+				fflush(stdout);
+
     			char* listStr;
     			getList(command, &n, &listStr);
     			
-    			sendto(udpsd, listStr, n, 0, (struct sockaddr *) &client, fromlen);
+    			sendto(udpsd, listStr, n-1, 0, (struct sockaddr *) &client, fromlen);
 	    		printf("Sent %s", listStr);
     			fflush(stdout);
 
 	    		free(listStr);
-	    	}
 	    }
 	}  	
 
@@ -208,6 +209,8 @@ void* tcp_thread(void* connectionInfo) {
 	tcpInfo* info = (tcpInfo*)connectionInfo;
 
 	int n;
+	int n2 = 0;
+	n2++;
 	char command[5];
 	char buffer[1025];
 	char* returnStr;
@@ -227,7 +230,6 @@ void* tcp_thread(void* connectionInfo) {
 	 		pthread_detach(pthread_self());
 	        pthread_exit(NULL);
 	    } else if (n == 0) {
-	    	printf("[child %u] Client disconnected\n", (unsigned int)pthread_self());
 	    	break;
 	    }
 	    // printf("got %s\n", buffer);
@@ -242,7 +244,7 @@ void* tcp_thread(void* connectionInfo) {
 	
 			getList(command, &n, &returnStr);		
 	
-			n = send( info->tcpsd, returnStr, n, 0 );
+			n2 = send( info->tcpsd, returnStr, n-1, 0 );
 			printf("[child %u] Sent %s", (unsigned int)pthread_self(), returnStr);
 			fflush(stdout);
 	
@@ -266,6 +268,9 @@ void* tcp_thread(void* connectionInfo) {
 		
 	} while (n > 0);
 
+
+	printf("[child %u] Client disconnected\n", (unsigned int)pthread_self());
+	
 	close(info->tcpsd);
 
 	pthread_detach(pthread_self());
@@ -279,10 +284,8 @@ int saveFile(tcpInfo* info, char* buffer, int messageSize) {
 	char* fileName;
 	int bytes;
 	char* msg = malloc(1024);
-
-	// printf("Entered saveFile\n");
-	// printf("buffer is: %s\n", buffer );
-
+	int sizecommand;
+	char* extraptr;
 
 	              /* SAVE fname bytes\nmessage */
 	if (sscanf(buffer, "%*s %ms %d\n%*s", &fileName, &bytes) != 2) {
@@ -292,25 +295,26 @@ int saveFile(tcpInfo* info, char* buffer, int messageSize) {
 		return 0;
 	}
 
-
-
 	n = sprintf(msg, "SAVE %s %d\n", fileName, bytes);
-
-	int sizecommand = n;
-
+	sizecommand = n; // this is the size of "SAVE filname bytes\n" */
 
 	printf("[child %u] Received %s", (unsigned int)pthread_self(), msg );
 	fflush(stdout);
 
-	char extra[bytes + 1];
-	memcpy(extra, &buffer[strlen(msg)], bytes);
-	extra[bytes] = '\0';
 
-	// printf("strlen(msg) = %d\n",(int)strlen(msg) );
-	// printf("bytes = %d\n", bytes);
+	// char extra[messageSize-sizecommand];
+	
+	// copy messagsize-sizecommand bytes from buffer to extra, starting at memory location 
+	// memcpy(extra, &buffer[sizecommand], messageSize-sizecommand);
+	extraptr = &buffer[sizecommand];
 
-	// printf("extra::::: %s\n", extra);
 
+
+	// printf("n = %d\n", n); // n aka length of the command
+	// printf("messageSize = %d\n", messageSize ); // size of entire message
+	// printf("command size = %d\n", sizecommand ); // size of command
+	// printf("message size - command = %d\n", messageSize-sizecommand); // size of the stuff to be written
+	// printf("Extra = %s\n", extra);
 
 	/* make sure fileName is valid */
 	if (strlen(fileName) > 32) {
@@ -329,29 +333,22 @@ int saveFile(tcpInfo* info, char* buffer, int messageSize) {
 		i++;
 	}
 
+	/* make sure number of bytes is valid */
 	if (bytes < 1) {
 		fprintf(stderr, "ERROR INVALID REQUEST\n");
 		n = send(info->tcpsd, "ERROR INVALID REQUEST\n", 22, 0);
 		return 0;
 	}
 
-
-	/* change to storage directory */
+	/* file checking... */
 	struct stat statbuffer;
-
-	if (chdir("storage") == -1) {
-		perror("ERROR chdir() failed");
-		return 0;
-	}
+	char filepath[40];
+	sprintf(filepath, "storage/%s", fileName);
 
 	/* if the file already exists, send error */
-	if (lstat(fileName, &statbuffer) == 0) {
+	if (lstat(filepath, &statbuffer) == 0) {
 		printf("[child %u] Sent ERROR FILE EXISTS\n", (unsigned int)pthread_self());
 		n = send(info->tcpsd, "ERROR FILE EXISTS\n", 18, 0);
-
-		if (chdir("..") == -1) {
-			perror("ERROR chdir() failed");
-		}
 
 		return 0;
 	}
@@ -359,30 +356,19 @@ int saveFile(tcpInfo* info, char* buffer, int messageSize) {
 	FILE* fp;
 	int totBytes = 0;
 	pthread_mutex_lock(&m);
-	fp = fopen(fileName, "wb+");
+	fp = fopen(filepath, "wb+");
 
-	// printf("about to write\n");
-	n = fwrite(extra, 1, messageSize - sizecommand, fp);
-	// printf("wrote\n");
-	// fputs(extra, fp);
+	n = fwrite(extraptr, 1, messageSize - sizecommand, fp);
 	totBytes += n;
 
-	// printf("totBytes = %d\n", totBytes);
-	// printf("bytes = %d\n", bytes);
 	int written = 0;
-
 	while (totBytes < bytes) {
-		// printf("reading more!!!!!!!\n");
 		/* read the command */
 		n = recv(info->tcpsd, buffer, 1024, 0 );
-		// printf("got another %d\n", n );
 		totBytes += n;
 
 		written = fwrite(buffer, 1, n, fp);
 		if (written != n) {
-			if (chdir("..") == -1) {
-				perror("ERROR chdir() failed\n");
-			}
 			perror("ERROR WRITING TO FILE");
 			n = send(info->tcpsd, "ERROR WRITING TO FILE\n", 22, 0);
 			if (fclose(fp) != 0) {
@@ -393,9 +379,6 @@ int saveFile(tcpInfo* info, char* buffer, int messageSize) {
 		}
 	}
 
-	// printf("totBytes = %d\n", totBytes);
-	// printf("bytes = %d\n", bytes);
-
 	if (fclose(fp) != 0) {
 		perror("ERROR CLOSING FILE");
 		n = send(info->tcpsd, "ERROR CLOSING FILE\n", 19, 0);
@@ -403,15 +386,9 @@ int saveFile(tcpInfo* info, char* buffer, int messageSize) {
 	}
 	pthread_mutex_unlock(&m);
 
-
 	printf("[child %u] Stored file \"%s\" (%d bytes)\n", (unsigned int)pthread_self(), fileName, bytes);
 
 	free(fileName);
-
-	if (chdir("..") == -1) {
-		perror("ERROR chdir() failed");
-		return 0;
-	}
 
 	return 1;
 }
@@ -451,146 +428,123 @@ int readFile(tcpInfo* info, char* buffer) {
 		i++;
 	}
 
+	/* make sure valid offset */
 	if (offset < 0) {
 		fprintf(stderr, "ERROR INVALID REQUEST\n");
 		n = send(info->tcpsd, "ERROR INVALID REQUEST\n", 22, 0);
 		return 0;
 	}
 
+	/* make sure valid length */
 	if (length < 1) {
 		fprintf(stderr, "ERROR INVALID REQUEST\n");
 		n = send(info->tcpsd, "ERROR INVALID REQUEST\n", 22, 0);
 		return 0;
 	}
 
-	/* change to storage directory */
 	struct stat statbuffer;
 	char filepath[40];
 	sprintf(filepath, "storage/%s", fileName);
-	printf("STORAGEEEEEEEEEEEEEEEEEEEE = %s\n", filepath);
-
-	if (chdir("storage") == -1) {
-		printf("cant open storage...\n");
-		perror("ERROR chdir() failed");
-		return 0;
-	}
 
 	/* if the file doesn't exist, send error */
-	if (lstat(fileName, &statbuffer) != 0) {
+	if (lstat(filepath, &statbuffer) != 0) {
 		printf("[child %u] Sent ERROR NO SUCH FILE\n", (unsigned int)pthread_self());
 		n = send(info->tcpsd, "ERROR NO SUCH FILE\n", 20, 0);
 
-		if (chdir("..") == -1) {
-			perror("ERROR chdir() failed");
-		}
-
 		return 0;
 	}
 
+	/* check byte range */
 	if (statbuffer.st_size < offset + length) {
-		// printf("statsize: %d\n", (int)statbuffer.st_size);
-		// printf("offset: %d\n", offset );
-		// printf("length: %d\n", length );
 		printf("[child %u] Sent ERROR INVALID BYTE RANGE\n", (unsigned int)pthread_self());
 		n = send(info->tcpsd, "ERROR INVALID BYTE RANGE\n", 26, 0);
 
-		if (chdir("..") == -1) {
-			perror("ERROR chdir() failed");
-		}
-
 		return 0;
 	}
+
+	// printf("file size is %d\n", (int) statbuffer.st_size );
 
 
 	/* READ FILE */
 	FILE* fp;
-	char bytes[length+1];
-	char trash[1024];
-	// int o = offset;
-	pthread_mutex_lock(&m);
-	fp = fopen(fileName, "rb");
 
-	// printf("need to skip over first %d bytes\n", offset );
+	char bytes[length+1];
+	// char trash[1024];
+	// printf("gonna lock\n");
+	pthread_mutex_lock(&m);
+	// printf("locked\n");
+	fp = fopen(filepath, "rb");
+	if (fp == NULL) {
+		fprintf(stderr, "ERROR OPENING FILE DURING READ\n");
+		return 0;
+	}	
+
+	// make sure fp at beginning
+	rewind(fp);
+
+   // printf("gonna read offset%d\n", offset);
 	/* skip over offset... */
-	n = fread(trash, 1, offset, fp);
-	if ( n != offset) {
-		// printf("offset = %d\n", offset);
-		// printf("n = %d\n", n);
+	// n = fread(trash, 1, offset, fp);
+	// printf("n = %d\n", n);
+	fseek(fp, offset, SEEK_SET);
+
+	if ( n != 0) {
 		perror("ERROR READING OFFSET");
-		if (chdir("..") == -1) {
-			perror("ERROR chdir() failed");
-			return 0;
-		}
+		
 		return 0;
 	}
-	// printf("skipped over %d\n", n);
 
-
-	// while (o > 0) {
-	// 	fgetc(fp);
-	// 	o--;
-	// }
-
+	// printf("getting relevant bytes\n");
 	/* save relevant bytes */
 	n = fread(bytes, 1, length, fp);
 	if ( n != length) {
 		perror("ERROR READING RELEVANT");
-		if (chdir("..") == -1) {
-			perror("ERROR chdir() failed");
-			return 0;
-		}
+		
 		return 0;
 	}
-	// while (length > 0) {
-	// 	bytes[i] = fgetc(fp);
-	// 	i++;
-	// 	length--;
-	// }
 
+	// printf("got relevant bytes\n");
 	/* close file */
 	if (fclose(fp) != 0) {
 		perror("ERROR CLOSING FILE");
 		n = send(info->tcpsd, "ERROR CLOSING FILE\n", 19, 0);
 
-		if (chdir("..") == -1) {
-			perror("ERROR chdir() failed");
-			return 0;
-		}
-
 		return 0;
 	}
-	pthread_mutex_unlock(&m);
 
 	char msg[1024];
 	int num = n;
 
-	sprintf(msg, "ACK %d\n", n);
-	n = send(info->tcpsd, msg, strlen(msg)+1, 0);
+	if (sprintf(msg, "ACK %d\n", n) == -1) {
+		printf("ERROR with sprintf in read\n");
+	}
+	n = send(info->tcpsd, msg, strlen(msg), 0);
+	if (n != strlen(msg)) {
+		printf("ERROR SENDING ack message in read\n");
+	}
 	n = send(info->tcpsd, bytes, num, 0);
+	if (n != num) {
+		printf("ERROR SENDING bytes message in read\n");
+	}
+
 	printf("[child %u] Sent %s",  (unsigned int)pthread_self(), msg);
 
 	sprintf(msg, "[child %u] Sent %d bytes of \"%s\" from offset %d", (unsigned int)pthread_self(), num, fileName, offset);
 	printf("%s\n", msg);
 
-
-	if (chdir("..") == -1) {
-		perror("ERROR chdir() failed");
-		return 0;
-	}
-
+	pthread_mutex_unlock(&m);
 
 	return 1;
-
-
-
 }
+
 void getList(char* command, int* n, char** listStr) {
 	int numStorageFiles = 0;
 	int numStorageFilesBytes = 1;
 	struct dirent** fileList;
 
+	pthread_mutex_lock(&m);
 	numStorageFiles = scandir("storage", &fileList, NULL, alphasort);
-
+	pthread_mutex_unlock(&m);
 	if (numStorageFiles == -1) {
 		perror("ERROR scandir() failed\n");
 		exit(EXIT_FAILURE);
@@ -634,6 +588,7 @@ void getList(char* command, int* n, char** listStr) {
 	(*listStr)[*n-2] = '\n';
 	(*listStr)[*n-1] = '\0'; 
 }
+
 
 
 /* ADD ERROR CHECKING EVERYWHERE - when concatenating strings, allocating memory etc 
